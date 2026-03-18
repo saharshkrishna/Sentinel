@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SentinelAI - Real-time Threat Detection</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            color: #e2e8f0;
+            min-height: 100vh;
+        }
+
+        .header {
+            background: rgba(15, 23, 42, 0.9);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid #334155;
+            padding: 1rem 2rem;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            background: linear-gradient(90deg, #60a5fa, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .status-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.875rem;
+            color: #94a3b8;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #22c55e;
+            box-shadow: 0 0 10px #22c55e;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .card {
+            background: rgba(30, 41, 59, 0.6);
+            backdrop-filter: blur(10px);
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 1.5rem;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .card-title {
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #94a3b8;
+        }
+
+        .card-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #f8fafc;
+        }
+
+        .severity-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .severity-critical { background: rgba(239,68,68,0.2); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
+        .severity-high     { background: rgba(249,115,22,0.2); color: #f97316; border: 1px solid rgba(249,115,22,0.3); }
+        .severity-medium   { background: rgba(234,179,8,0.2);  color: #eab308; border: 1px solid rgba(234,179,8,0.3);  }
+        .severity-low      { background: rgba(34,197,94,0.2);  color: #22c55e; border: 1px solid rgba(34,197,94,0.3);  }
+
+        .alerts-container {
+            background: rgba(30, 41, 59, 0.6);
+            backdrop-filter: blur(10px);
+            border: 1px solid #334155;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .alerts-header {
+            background: rgba(15, 23, 42, 0.8);
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid #334155;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .alerts-list { max-height: 600px; overflow-y: auto; }
+
+        .alert-item {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid #334155;
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            gap: 1rem;
+            align-items: start;
+            animation: slideIn 0.3s ease-out;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .alert-item:hover { background: rgba(51, 65, 85, 0.5); }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(-20px); }
+            to   { opacity: 1; transform: translateX(0); }
+        }
+
+        .alert-time { font-size: 0.75rem; color: #64748b; font-family: monospace; }
+        .alert-content { min-width: 0; }
+
+        .alert-title {
+            font-weight: 600;
+            color: #f8fafc;
+            margin-bottom: 0.25rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .alert-meta {
+            font-size: 0.875rem;
+            color: #94a3b8;
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .alert-log {
+            font-family: monospace;
+            font-size: 0.75rem;
+            color: #64748b;
+            margin-top: 0.5rem;
+            padding: 0.5rem;
+            background: rgba(15, 23, 42, 0.5);
+            border-radius: 4px;
+            overflow-x: auto;
+            white-space: nowrap;
+        }
+
+        .mitre-tag {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.125rem 0.5rem;
+            background: rgba(96, 165, 250, 0.2);
+            color: #60a5fa;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-family: monospace;
+        }
+
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+
+        .chart-container {
+            background: rgba(30, 41, 59, 0.6);
+            backdrop-filter: blur(10px);
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 1.5rem;
+            height: 300px;
+            position: relative;
+        }
+
+        .empty-state { text-align: center; padding: 3rem; color: #64748b; }
+
+        .filter-bar { display: flex; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
+
+        .filter-btn {
+            padding: 0.5rem 1rem;
+            background: rgba(51, 65, 85, 0.5);
+            border: 1px solid #475569;
+            color: #e2e8f0;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.875rem;
+        }
+
+        .filter-btn:hover, .filter-btn.active {
+            background: rgba(96, 165, 250, 0.2);
+            border-color: #60a5fa;
+        }
+
+        .confidence-bar {
+            width: 100%;
+            height: 4px;
+            background: #334155;
+            border-radius: 2px;
+            margin-top: 0.5rem;
+            overflow: hidden;
+        }
+
+        .confidence-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #60a5fa, #a78bfa);
+            transition: width 0.3s;
+        }
+
+        .ai-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.125rem 0.5rem;
+            background: linear-gradient(90deg, rgba(168,85,247,0.2), rgba(236,72,153,0.2));
+            color: #e879f9;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            border: 1px solid rgba(236, 72, 153, 0.3);
+        }
+
+        @media (max-width: 768px) {
+            .dashboard-grid, .charts-grid { grid-template-columns: 1fr; }
+            .alert-item { grid-template-columns: 1fr; }
+        }
+
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+        /* ── Upload Panel ── */
+        .upload-panel {
+            background: rgba(30, 41, 59, 0.6);
+            backdrop-filter: blur(10px);
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        .upload-panel h2 {
+            font-size: 1.125rem;
+            color: #f8fafc;
+            margin-bottom: 1.25rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .drop-zone {
+            border: 2px dashed #475569;
+            border-radius: 10px;
+            padding: 2.5rem;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+            position: relative;
+        }
+        .drop-zone:hover, .drop-zone.drag-over {
+            border-color: #60a5fa;
+            background: rgba(96, 165, 250, 0.05);
+        }
+        .drop-zone input[type="file"] {
+            position: absolute; inset: 0; opacity: 0; cursor: pointer;
+            width: 100%; height: 100%;
+        }
+        .drop-zone-icon { font-size: 2.5rem; margin-bottom: 0.75rem; }
+        .drop-zone-text { color: #94a3b8; font-size: 0.9rem; }
+        .drop-zone-text span { color: #60a5fa; font-weight: 600; }
+        .drop-zone-hint { font-size: 0.75rem; color: #475569; margin-top: 0.4rem; }
+
+        .upload-actions {
+            display: flex; align-items: center; gap: 1rem;
+            margin-top: 1rem; flex-wrap: wrap;
+        }
+        .btn-scan {
+            padding: 0.6rem 1.5rem;
+            background: linear-gradient(90deg, #3b82f6, #6366f1);
+            color: #fff; border: none; border-radius: 8px;
+            cursor: pointer; font-size: 0.9rem; font-weight: 600;
+            transition: opacity 0.2s, transform 0.1s;
+        }
+        .btn-scan:hover  { opacity: 0.88; }
+        .btn-scan:active { transform: scale(0.97); }
+        .btn-scan:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn-clear {
+            padding: 0.6rem 1.2rem; background: transparent; color: #94a3b8;
+            border: 1px solid #475569; border-radius: 8px;
+            cursor: pointer; font-size: 0.875rem; transition: all 0.2s;
+        }
+        .btn-clear:hover { border-color: #60a5fa; color: #e2e8f0; }
+        .selected-file { font-size: 0.875rem; color: #60a5fa; display: flex; align-items: center; gap: 0.4rem; }
+
+        .upload-progress {
+            height: 4px; background: #1e293b;
+            border-radius: 2px; overflow: hidden;
+            margin-top: 1rem; display: none;
+        }
+        .upload-progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #3b82f6, #a78bfa);
+            width: 60%; animation: scanpulse 1.2s ease-in-out infinite alternate;
+        }
+        @keyframes scanpulse { from { opacity: 0.5; } to { opacity: 1; } }
+
+        .scan-summary {
+            display: none; margin-top: 1.25rem; padding: 1rem 1.5rem;
+            background: rgba(15, 23, 42, 0.6);
+            border-radius: 8px; border: 1px solid #334155;
+        }
+        .scan-summary-grid { display: flex; gap: 2rem; flex-wrap: wrap; margin-bottom: 1rem; }
+        .scan-stat { display: flex; flex-direction: column; gap: 0.2rem; }
+        .scan-stat-label { font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; }
+        .scan-stat-value { font-size: 1.4rem; font-weight: 700; color: #f8fafc; }
+
+        .results-table-wrap {
+            overflow-x: auto; margin-top: 0.75rem;
+            max-height: 420px; overflow-y: auto; border-radius: 8px;
+        }
+        .results-table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+        .results-table th {
+            background: rgba(15, 23, 42, 0.8); color: #94a3b8;
+            font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;
+            padding: 0.6rem 0.75rem; text-align: left;
+            position: sticky; top: 0; z-index: 1;
+        }
+        .results-table td {
+            padding: 0.6rem 0.75rem; border-bottom: 1px solid #1e293b;
+            color: #e2e8f0; vertical-align: top;
+            max-width: 260px; word-break: break-word;
+        }
+        .results-table tr:hover td { background: rgba(51, 65, 85, 0.3); }
+        .results-table .no-results td { text-align: center; color: #22c55e; padding: 2rem; }
+
+        .scan-error {
+            display: none; margin-top: 1rem; padding: 0.75rem 1rem;
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 8px; color: #f87171; font-size: 0.875rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h1>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+                </svg>
+                SentinelAI
+            </h1>
+            <div class="status-indicator">
+                <span class="status-dot"></span>
+                <span>Live Monitoring Active</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="dashboard-grid">
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Total Alerts</span>
+                    <span class="severity-badge severity-high">Live</span>
+                </div>
+                <div class="card-value" id="total-alerts">0</div>
+                <div style="margin-top: 0.5rem; font-size: 0.875rem; color: #64748b;">Last 24 hours</div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Critical Threats</span>
+                </div>
+                <div class="card-value" id="critical-count" style="color: #ef4444;">0</div>
+                <div style="margin-top: 0.5rem; font-size: 0.875rem; color: #64748b;">Immediate action required</div>
+            </div>
+<div class="card">
+                <div class="card-header">
+                    <span class="card-title">AI Analysis</span>
+                </div>
+                <div class="card-value" id="ai-count">0</div>
+                <div style="margin-top: 0.5rem; font-size: 0.875rem; color: #64748b;">Anomalies detected</div>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">MITRE Coverage</span>
+                </div>
+                <div class="card-value" id="mitre-count">0</div>
+                <div style="margin-top: 0.5rem; font-size: 0.875rem; color: #64748b;">Techniques detected</div>
+            </div>
+
+            
+        </div>
+
+        <!-- ── Upload & Scan Panel ── -->
+        <div class="upload-panel">
+            <h2>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                </svg>
+                Upload Log File &amp; Scan for Threats
+            </h2>
+
+            <div class="drop-zone" id="drop-zone">
+                <input type="file" id="log-file-input" accept=".log,.txt,.csv,.out,.evtx,text/*">
+                <div class="drop-zone-icon">📂</div>
+                <div class="drop-zone-text">Drop your log file here or <span>browse</span></div>
+                <div class="drop-zone-hint">Supports .log, .txt, .csv, .out &mdash; max 10 MB</div>
+            </div>
+
+            <div class="upload-actions">
+                <button class="btn-scan" id="btn-scan" disabled onclick="scanFile()">🔍 Scan File</button>
+                <button class="btn-clear" onclick="clearUpload()">✕ Clear</button>
+                <span class="selected-file" id="selected-file-label"></span>
+            </div>
+
+            <div class="upload-progress" id="upload-progress">
+                <div class="upload-progress-bar"></div>
+            </div>
+            <div class="scan-error" id="scan-error"></div>
+
+            <div class="scan-summary" id="scan-summary">
+                <div class="scan-summary-grid">
+                    <div class="scan-stat">
+                        <span class="scan-stat-label">File</span>
+                        <span class="scan-stat-value" id="sum-filename" style="font-size:1rem;">—</span>
+                    </div>
+                    <div class="scan-stat">
+                        <span class="scan-stat-label">Lines Scanned</span>
+                        <span class="scan-stat-value" id="sum-lines">0</span>
+                    </div>
+                    <div class="scan-stat">
+                        <span class="scan-stat-label">Threats Found</span>
+                        <span class="scan-stat-value" id="sum-threats" style="color:#ef4444;">0</span>
+                    </div>
+                </div>
+
+                <div class="results-table-wrap">
+                    <table class="results-table" id="results-table">
+                        <thead>
+                            <tr>
+                                <th>Severity</th>
+                                <th>Rule</th>
+                                <th>MITRE</th>
+                                <th>Category</th>
+                                <th>Source IP</th>
+                                <th>Confidence</th>
+                                <th>Log Excerpt</th>
+                            </tr>
+                        </thead>
+                        <tbody id="results-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="alerts-container">
+            <div class="alerts-header">
+                <h2 style="font-size: 1.125rem; color: #f8fafc;">Real-time Threat Alerts</h2>
+                <div class="filter-bar">
+                    <button class="filter-btn active" onclick="filterAlerts('all')">All</button>
+                    <button class="filter-btn" onclick="filterAlerts('critical')">Critical</button>
+                    <button class="filter-btn" onclick="filterAlerts('high')">High</button>
+                    <button class="filter-btn" onclick="filterAlerts('ai')">AI Detected</button>
+                </div>
+            </div>
+            <div class="alerts-list" id="alerts-list">
+                <div class="empty-state">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom: 1rem; opacity: 0.5;">
+                        <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <p>Monitoring active... Waiting for threats</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="charts-grid">
+            <div class="chart-container">
+                <h3 style="margin-bottom: 1rem; font-size: 0.875rem; color: #94a3b8;">Attack Categories</h3>
+                <canvas id="categoryChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <h3 style="margin-bottom: 1rem; font-size: 0.875rem; color: #94a3b8;">Severity Distribution</h3>
+                <canvas id="severityChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let alerts = [];
+        let currentFilter = 'all';
+        let categoryChart, severityChart;
+
+        function initCharts() {
+            const ctx1 = document.getElementById('categoryChart').getContext('2d');
+            const ctx2 = document.getElementById('severityChart').getContext('2d');
+
+            categoryChart = new Chart(ctx1, {
+                type: 'doughnut',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        data: [],
+                        backgroundColor: ['#60a5fa','#a78bfa','#f472b6','#fbbf24','#34d399','#22d3ee','#f87171','#a3e635'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'right', labels: { color: '#94a3b8', font: { size: 11 } } }
+                    }
+                }
+            });
+
+            severityChart = new Chart(ctx2, {
+                type: 'bar',
+                data: {
+                    labels: ['Critical', 'High', 'Medium', 'Low'],
+                    datasets: [{
+                        label: 'Alerts',
+                        data: [0, 0, 0, 0],
+                        backgroundColor: ['#ef4444', '#f97316', '#eab308', '#22c55e'],
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, ticks: { color: '#64748b' }, grid: { color: '#334155' } },
+                        x: { ticks: { color: '#94a3b8' }, grid: { display: false } }
+                    }
+                }
+            });
+        }
+
+        function getSeverityClass(severity) {
+            return `severity-${severity.toLowerCase()}`;
+        }
+
+        function formatTime(timestamp) {
+            return new Date(timestamp).toLocaleTimeString();
+        }
+
+        function createAlertElement(alert) {
+            const div = document.createElement('div');
+            div.className = 'alert-item';
+            div.dataset.severity = alert.severity.toLowerCase();
+            div.dataset.ai = alert.rule_id.startsWith('AI') ? 'true' : 'false';
+
+            const aiBadge = alert.rule_id.startsWith('AI') ? '<span class="ai-badge">🤖 AI</span>' : '';
+
+            div.innerHTML = `
+                <div class="alert-time">${formatTime(alert.timestamp)}</div>
+                <div class="alert-content">
+                    <div class="alert-title">
+                        ${alert.rule_name}
+                        ${aiBadge}
+                        <span class="mitre-tag">${alert.mitre_technique}</span>
+                    </div>
+                    <div class="alert-meta">
+                        <span class="severity-badge ${getSeverityClass(alert.severity)}">${alert.severity}</span>
+                        <span>📍 ${alert.source_ip || 'N/A'}</span>
+                        <span>📊 ${(alert.confidence * 100).toFixed(0)}% confidence</span>
+                        <span>🏷️ ${alert.category}</span>
+                    </div>
+                    ${alert.ai_analysis ? `<div style="margin-top:0.5rem;color:#e879f9;font-size:0.875rem;">🤖 ${alert.ai_analysis}</div>` : ''}
+                    ${alert.recommended_action ? `<div style="margin-top:0.25rem;color:#34d399;font-size:0.875rem;">💡 ${alert.recommended_action}</div>` : ''}
+                    <div class="alert-log">${alert.raw_log}</div>
+                    <div class="confidence-bar">
+                        <div class="confidence-fill" style="width:${alert.confidence * 100}%"></div>
+                    </div>
+                </div>
+            `;
+            return div;
+        }
+
+        function updateAlertsList() {
+            const container = document.getElementById('alerts-list');
+            const filtered = alerts.filter(a => {
+                if (currentFilter === 'all') return true;
+                if (currentFilter === 'ai') return a.rule_id.startsWith('AI');
+                return a.severity.toLowerCase() === currentFilter;
+            });
+
+            if (filtered.length === 0) {
+                container.innerHTML = '<div class="empty-state"><p>No alerts match the current filter</p></div>';
+                return;
+            }
+
+            container.innerHTML = '';
+            filtered.slice(0, 50).forEach(alert => container.appendChild(createAlertElement(alert)));
+        }
+
+        function filterAlerts(type) {
+            currentFilter = type;
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.textContent.toLowerCase().includes(type) || (type === 'all' && btn.textContent === 'All')) {
+                    btn.classList.add('active');
+                }
+            });
+            updateAlertsList();
+        }
+
+        function updateStats() {
+            fetch('/api/stats')
+                .then(r => r.json())
+                .then(stats => {
+                    document.getElementById('total-alerts').textContent = stats.alerts_generated;
+                    document.getElementById('critical-count').textContent = stats.severity_counts.critical || 0;
+                    document.getElementById('mitre-count').textContent = stats.mitre_coverage.length;
+                    document.getElementById('ai-count').textContent = stats.rule_hits['AI-001'] || 0;
+
+                    if (categoryChart) {
+                        categoryChart.data.labels = Object.keys(stats.category_counts);
+                        categoryChart.data.datasets[0].data = Object.values(stats.category_counts);
+                        categoryChart.update();
+                    }
+
+                    if (severityChart) {
+                        severityChart.data.datasets[0].data = [
+                            stats.severity_counts.critical || 0,
+                            stats.severity_counts.high || 0,
+                            stats.severity_counts.medium || 0,
+                            stats.severity_counts.low || 0
+                        ];
+                        severityChart.update();
+                    }
+                });
+        }
+
+        socket.on('new_alert', (alert) => {
+            alerts.unshift(alert);
+            if (alerts.length > 100) alerts.pop();
+            updateAlertsList();
+            updateStats();
+
+            if (alert.severity === 'CRITICAL' && Notification.permission === 'granted') {
+                new Notification('Critical Security Alert', {
+                    body: `${alert.rule_name}: ${alert.raw_log.substring(0, 100)}`,
+                    icon: '/favicon.ico'
+                });
+            }
+        });
+
+        if ('Notification' in window && Notification.permission === 'default') {
+            Notification.requestPermission();
+        }
+
+        initCharts();
+        updateStats();
+        setInterval(updateStats, 5000);
+
+        /* ── Upload & Scan Logic ── */
+        const fileInput    = document.getElementById('log-file-input');
+        const dropZone     = document.getElementById('drop-zone');
+        const btnScan      = document.getElementById('btn-scan');
+        const fileLabel    = document.getElementById('selected-file-label');
+        const progress     = document.getElementById('upload-progress');
+        const scanSummary  = document.getElementById('scan-summary');
+        const scanError    = document.getElementById('scan-error');
+
+        let selectedFile = null;
+
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files.length) setFile(fileInput.files[0]);
+        });
+
+        dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+        dropZone.addEventListener('drop', e => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            if (e.dataTransfer.files.length) setFile(e.dataTransfer.files[0]);
+        });
+
+        function setFile(file) {
+            selectedFile = file;
+            fileLabel.textContent = `📄 ${file.name}  (${(file.size / 1024).toFixed(1)} KB)`;
+            btnScan.disabled = false;
+            scanSummary.style.display = 'none';
+            scanError.style.display   = 'none';
+            progress.style.display    = 'none';
+        }
+
+        function clearUpload() {
+            selectedFile = null;
+            fileInput.value = '';
+            fileLabel.textContent = '';
+            btnScan.disabled = true;
+            scanSummary.style.display = 'none';
+            scanError.style.display   = 'none';
+            progress.style.display    = 'none';
+            document.getElementById('results-tbody').innerHTML = '';
+        }
+
+        async function scanFile() {
+            if (!selectedFile) return;
+            btnScan.disabled = true;
+            scanError.style.display   = 'none';
+            scanSummary.style.display = 'none';
+            progress.style.display    = 'block';
+
+            const form = new FormData();
+            form.append('file', selectedFile);
+
+            try {
+                const resp = await fetch('/api/upload', { method: 'POST', body: form });
+                const data = await resp.json();
+
+                progress.style.display = 'none';
+                btnScan.disabled = false;
+
+                if (!resp.ok || data.error) {
+                    scanError.textContent = `⚠️  ${data.error || 'Scan failed — please try again.'}`;
+                    scanError.style.display = 'block';
+                    return;
+                }
+
+                // Populate summary
+                document.getElementById('sum-filename').textContent = data.filename;
+                document.getElementById('sum-lines').textContent    = data.lines_scanned.toLocaleString();
+                document.getElementById('sum-threats').textContent  = data.alerts_found;
+
+                const tbody = document.getElementById('results-tbody');
+                tbody.innerHTML = '';
+
+                if (data.alerts_found === 0) {
+                    tbody.innerHTML = '<tr class="no-results"><td colspan="7">✅ No threats detected in this file.</td></tr>';
+                } else {
+                    data.alerts.forEach(a => {
+                        const tr = document.createElement('tr');
+                        tr.innerHTML = `
+                            <td><span class="severity-badge severity-${a.severity.toLowerCase()}">${a.severity}</span></td>
+                            <td>${a.rule_name}</td>
+                            <td><span class="mitre-tag">${a.mitre_technique}</span></td>
+                            <td>${a.category}</td>
+                            <td>${a.source_ip || '—'}</td>
+                            <td>${(a.confidence * 100).toFixed(0)}%</td>
+                            <td style="font-family:monospace;font-size:0.72rem;color:#64748b;">${a.raw_log.substring(0, 80)}${a.raw_log.length > 80 ? '…' : ''}</td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+                }
+
+                scanSummary.style.display = 'block';
+            } catch (err) {
+                progress.style.display = 'none';
+                btnScan.disabled = false;
+                scanError.textContent = `⚠️  Network error: ${err.message}`;
+                scanError.style.display = 'block';
+            }
+        }
+    </script>
+</body>
+</html>
