@@ -6,8 +6,8 @@ the Flask-SocketIO server.
 """
 
 import threading
-from app import create_app
-from app.routes import run_analyzer
+from tray.tray_app import create_app
+from service.service_runner import run_analyzer
 
 if __name__ == '__main__':
     app, socketio, analyzer = create_app()

@@ -1,0 +1,5 @@
+pypiwin32
+pystray
+Pillow
+requests
+matplotlib
