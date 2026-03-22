@@ -4,6 +4,7 @@ import time
 import logging
 from config.settings import MONITOR_CHANNELS
 from core.decision_engine import process_event
+from core import process_tracker
 
 logger = logging.getLogger("IDS_LogReader")
 
@@ -83,9 +84,13 @@ class LogReader:
                                 if inserts and len(inserts) > 5:
                                     event_data["user"] = str(inserts[5])
                                 
+                                # Enrich with live process info
+                                event_data = process_tracker.enrich(event_data)
+                                
                                 # Output live log to terminal
                                 safe_msg = msg.replace('\r', '').replace('\n', ' ')
-                                print(f"[EVENT] {source_name[:20]:<20} | {event_id:<5} | {str(safe_msg)[:80]}...")
+                                proc_label = event_data.get('process_name', source_name)
+                                print(f"[EVENT] {proc_label[:20]:<20} | {event_id:<5} | {str(safe_msg)[:80]}...")
                                     
                                 # Send to hybrid engine!
                                 process_event(event_data, silent=self.silent)
