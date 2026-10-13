@@ -4,14 +4,14 @@ limitations.py - Documents all known system limitations of the Windows IDS.
 
 LIMITATIONS = {
     "System-Level": [
-        "Some Windows Event Logs do not contain process name or PID information.",
+        "Some event logs do not contain process name or PID information.",
         "Mapping log events to running processes may not always be accurate.",
-        "Security log access requires Administrator privileges.",
+        "Security/audit log access requires Administrator (Windows) or root (Linux) privileges.",
     ],
     "Permission Constraints": [
-        "Administrator privileges are required to terminate or suspend processes.",
-        "Critical system processes (lsass.exe, csrss.exe, etc.) are protected and cannot be controlled.",
-        "Some system services cannot be stopped programmatically without Admin rights.",
+        "Elevated privileges are required to terminate or suspend unauthorized processes.",
+        "Critical system processes (lsass.exe, csrss.exe on Windows; systemd, init on Linux) are protected and cannot be controlled.",
+        "Some system services cannot be stopped programmatically without root/Admin rights.",
     ],
     "Detection Accuracy": [
         "Rule-based detection may produce false positives for benign events.",

@@ -1,71 +1,69 @@
+"""
+main.py - Main entry point for Sentinel IDS (Windows and Linux).
+"""
 import sys
 import os
 import argparse
-import ctypes
-from service.service_runner import IDSService
-import win32serviceutil
-from tray.tray_app import run_tray
+from core.platform_adapter import is_admin, IS_WINDOWS, IS_LINUX
 from core.log_reader import LogReader
 
-def is_admin():
-    """Check if script is running with administrative privileges."""
-    try:
-        return ctypes.windll.shell32.IsUserAnAdmin()
-    except:
-        return False
 
 def main():
-    parser = argparse.ArgumentParser(description="Windows IDS Manager")
-    parser.add_argument("--install", action="store_true", help="Install the background service (Requires Admin)")
-    parser.add_argument("--remove", action="store_true", help="Remove the background service (Requires Admin)")
-    parser.add_argument("--start", action="store_true", help="Start the background service (Requires Admin)")
-    parser.add_argument("--stop", action="store_true", help="Stop the background service (Requires Admin)")
+    parser = argparse.ArgumentParser(description="Sentinel IDS & Threat Monitor")
+    parser.add_argument("--install", action="store_true", help="Install background service (Requires Admin/root)")
+    parser.add_argument("--remove", action="store_true", help="Remove background service (Requires Admin/root)")
+    parser.add_argument("--start", action="store_true", help="Start background service (Requires Admin/root)")
+    parser.add_argument("--stop", action="store_true", help="Stop background service (Requires Admin/root)")
     parser.add_argument("--tray", action="store_true", help="Run the system tray UI")
     parser.add_argument("--console", action="store_true", help="Run directly in console for testing")
     parser.add_argument("--desktop", action="store_true", help="Run the Tkinter Desktop Analysis UI")
-    
+
     args = parser.parse_args()
-    
+
     if args.install or args.remove or args.start or args.stop:
-        if not is_admin():
-            print("ERROR: Service management commands require Administrative privileges.")
-            sys.exit(1)
-            
-        service_args = []
-        if args.install: service_args.append("install")
-        if args.remove: service_args.append("remove")
-        if args.start: service_args.append("start")
-        if args.stop: service_args.append("stop")
-        
+        from service.service_runner import handle_service_command
+
+        action = "install" if args.install else "remove" if args.remove else "start" if args.start else "stop"
         try:
-            sys.argv = ['service_runner.py'] + service_args
-            win32serviceutil.HandleCommandLine(IDSService)
-            print("Service command executed successfully.")
+            handle_service_command(action)
         except Exception as e:
             print(f"Failed to execute service command. Error: {e}")
-            
+
     elif args.tray:
-        print("Starting System Tray Interface (Leave this terminal or launch with pythonw to hide)...")
+        print("Starting System Tray Interface...")
+        from tray.tray_app import run_tray
         run_tray()
-        
+
     elif args.console:
         if not is_admin():
-            print("WARNING: Running without Admin privileges. Some events might not be accessible.")
-        print("Starting IDS directly in console mode. Press Ctrl+C to stop.")
+            priv_label = "Administrator" if IS_WINDOWS else "root / sudo"
+            print(f"WARNING: Running without {priv_label} privileges. Some low-level system logs might not be accessible.")
+        print("Starting Sentinel IDS in console mode. Press Ctrl+C to stop.")
+        from core.process_tree import get_process_tree
+        tree = get_process_tree()
+        tree.start()
+
+        from core.canary_sentry import get_canary_sentry
+        canary = get_canary_sentry()
+        canary.start()
+
         reader = LogReader()
         try:
             reader.start()
         except KeyboardInterrupt:
             reader.stop()
+            canary.stop(cleanup=True)
+            tree.stop()
             print("\nIDS Stopped.")
-            
+
     elif args.desktop:
         print("Starting Desktop Interface...")
         from ui.desktop_app import run_desktop_app
         run_desktop_app()
-            
+
     else:
         parser.print_help()
+
 
 if __name__ == "__main__":
     main()

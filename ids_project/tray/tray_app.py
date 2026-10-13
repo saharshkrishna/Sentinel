@@ -1,14 +1,31 @@
-import pystray
-from PIL import Image, ImageDraw
+"""
+tray_app.py - Cross-platform system tray application for Sentinel.
+"""
 import os
 import time
 import json
 import threading
 import sys
 import tempfile
-import msvcrt
-import win32serviceutil
+import subprocess
+from pathlib import Path
+from PIL import Image, ImageDraw
 from config.settings import ALERTS_JSON_FILE, SERVICE_NAME
+from core.platform_adapter import IS_WINDOWS, IS_LINUX
+
+try:
+    import pystray
+    HAS_PYSTRAY = True
+except ImportError:
+    HAS_PYSTRAY = False
+
+if IS_WINDOWS:
+    try:
+        import msvcrt
+        import win32serviceutil
+    except ImportError:
+        pass
+
 
 def create_icon_image(color1, color2):
     # Generates a basic shield icon representing security IDS
@@ -19,47 +36,81 @@ def create_icon_image(color1, color2):
     d.polygon([(32, 5), (60, 20), (50, 50), (32, 60), (14, 50), (4, 20)], fill=color1, outline=color2)
     return image
 
+
 def get_service_status():
-    try:
-        status = win32serviceutil.QueryServiceStatus(SERVICE_NAME)[1]
-        if status == 4: # SERVICE_RUNNING
-            return "Running"
-        elif status == 1: # SERVICE_STOPPED
-            return "Stopped"
-        else:
-            return "Pending"
-    except Exception:
-        return "Not Installed"
+    if IS_WINDOWS:
+        try:
+            import win32serviceutil
+            status = win32serviceutil.QueryServiceStatus(SERVICE_NAME)[1]
+            if status == 4:  # SERVICE_RUNNING
+                return "Running"
+            elif status == 1:  # SERVICE_STOPPED
+                return "Stopped"
+            else:
+                return "Pending"
+        except Exception:
+            return "Not Installed"
+    else:
+        try:
+            res = subprocess.run(["systemctl", "is-active", "sentinel.service"],
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            return res.stdout.strip().capitalize() if res.stdout.strip() else "Stopped"
+        except Exception:
+            return "Standalone (Linux)"
+
 
 def start_service(icon, item):
-    try:
-        win32serviceutil.StartService(SERVICE_NAME)
-        icon.notify("IDS Service Started successfully", "Windows IDS")
-    except Exception as e:
-        icon.notify(f"Failed to start service. Run as Admin? ({str(e)[:50]})", "Windows IDS Error")
+    if IS_WINDOWS:
+        try:
+            import win32serviceutil
+            win32serviceutil.StartService(SERVICE_NAME)
+            icon.notify("IDS Service Started successfully", "Sentinel IDS")
+        except Exception as e:
+            icon.notify(f"Failed to start service. Run as Admin? ({str(e)[:50]})", "Sentinel Error")
+    else:
+        try:
+            subprocess.run(["systemctl", "start", "sentinel.service"], check=True)
+            icon.notify("Sentinel Service Started", "Sentinel IDS")
+        except Exception as e:
+            icon.notify(f"Failed to start service. Run with sudo? ({str(e)[:50]})", "Sentinel Error")
+
 
 def stop_service(icon, item):
-    try:
-        win32serviceutil.StopService(SERVICE_NAME)
-        icon.notify("IDS Service Stopped", "Windows IDS")
-    except Exception as e:
-        icon.notify(f"Failed to stop service. ({str(e)[:50]})", "Windows IDS Error")
+    if IS_WINDOWS:
+        try:
+            import win32serviceutil
+            win32serviceutil.StopService(SERVICE_NAME)
+            icon.notify("IDS Service Stopped", "Sentinel IDS")
+        except Exception as e:
+            icon.notify(f"Failed to stop service. ({str(e)[:50]})", "Sentinel Error")
+    else:
+        try:
+            subprocess.run(["systemctl", "stop", "sentinel.service"], check=True)
+            icon.notify("Sentinel Service Stopped", "Sentinel IDS")
+        except Exception as e:
+            icon.notify(f"Failed to stop service. ({str(e)[:50]})", "Sentinel Error")
+
 
 def view_alerts(icon, item):
     if os.path.exists(ALERTS_JSON_FILE):
-        os.startfile(ALERTS_JSON_FILE)
+        if IS_WINDOWS and hasattr(os, 'startfile'):
+            os.startfile(ALERTS_JSON_FILE)
+        else:
+            subprocess.Popen(["xdg-open", str(ALERTS_JSON_FILE)])
     else:
-        icon.notify("No alerts recorded yet.", "Windows IDS")
+        icon.notify("No alerts recorded yet.", "Sentinel IDS")
+
 
 def exit_action(icon, item):
     icon.stop()
+
 
 def poll_alerts(icon):
     # Monitor the alerts.json file and dispatch notifications
     last_size = 0
     if os.path.exists(ALERTS_JSON_FILE):
         last_size = os.path.getsize(ALERTS_JSON_FILE)
-        
+
     while icon.visible:
         try:
             if os.path.exists(ALERTS_JSON_FILE):
@@ -69,15 +120,15 @@ def poll_alerts(icon):
                         f.seek(last_size)
                         new_lines = f.readlines()
                     last_size = current_size
-                    
+
                     valid_alerts = []
                     for line in new_lines:
                         if line.strip():
                             try:
                                 valid_alerts.append(json.loads(line))
-                            except:
+                            except Exception:
                                 pass
-                                
+
                     if valid_alerts:
                         if len(valid_alerts) > 1:
                             title = f"IDS: {len(valid_alerts)} Alerts Flagged!"
@@ -87,22 +138,34 @@ def poll_alerts(icon):
                             alert = valid_alerts[-1]
                             title = f"IDS Alert: {alert.get('severity', 'UNKNOWN')}"
                             msg = f"Event ID: {alert.get('event_id')}\nSource: {alert.get('source')}"
-                        
+
                         try:
                             icon.notify(msg, title)
-                        except:
+                        except Exception:
                             pass
         except Exception:
             pass
         time.sleep(2)
 
+
 def run_tray():
+    if not HAS_PYSTRAY:
+        print("ERROR: pystray is required for the system tray interface.")
+        print("Install it via: pip install pystray Pillow")
+        return
+
+    # Cross-platform single instance lock
     lockfile = os.path.join(tempfile.gettempdir(), 'ids_tray_app.lock')
     try:
         lock_fd = os.open(lockfile, os.O_CREAT | os.O_WRONLY)
-        msvcrt.locking(lock_fd, msvcrt.LK_NBLCK, 1)
-    except IOError:
-        return # Already running, perfectly exit
+        if IS_WINDOWS:
+            import msvcrt
+            msvcrt.locking(lock_fd, msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (IOError, OSError):
+        return  # Already running, exit cleanly
 
     image = create_icon_image("blue", "black")
     menu = pystray.Menu(
@@ -112,14 +175,15 @@ def run_tray():
         pystray.MenuItem("View Recent Alerts", view_alerts),
         pystray.MenuItem("Exit", exit_action)
     )
-    icon = pystray.Icon("WindowsIDS", image, "Windows IDS", menu)
-    
+    icon = pystray.Icon("SentinelIDS", image, "Sentinel IDS", menu)
+
     def setup(icon):
         icon.visible = True
         t = threading.Thread(target=poll_alerts, args=(icon,), daemon=True)
         t.start()
-        
+
     icon.run(setup=setup)
+
 
 if __name__ == "__main__":
     run_tray()

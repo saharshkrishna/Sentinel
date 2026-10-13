@@ -1,16 +1,17 @@
-# Windows IDS & Log Analyzer (SentinelAI)
+# Cross-Platform IDS & Log Analyzer (SentinelAI)
 
-This project provides a comprehensive Intrusion Detection System (IDS) and Real-Time Log Analyzer for Windows environments. It is designed to detect suspicious behavior and generate actionable alerts. The project offers multiple user interfaces to interact with the service, varying from lightweight background tray applications to full-featured Web and Desktop dashboards.
+This project provides a comprehensive Intrusion Detection System (IDS) and Real-Time Log Analyzer for **Windows and Linux** environments. It is designed to detect suspicious behavior, track processes, and generate actionable alerts. The project offers multiple interfaces to interact with the service, including terminal console mode, lightweight background tray apps, desktop GUI dashboards, and background service daemons (Windows Service & Linux systemd).
+
+For full technical specifications, system architecture diagrams, and executable validation test suites, refer to [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Prerequisites
 
 - **Python 3.8+** installed.
-- **Administrator Privileges** are required to read system event logs and manage the background service.
+- **Elevated Privileges** (Administrator on Windows, root/sudo on Linux) to read low-level system logs and manage background services.
 
 #### Installation
 ```bash
 # Install required Python packages
-pip install -r requirements.txt
 pip install -r ids_project/requirements.txt
 ```
 

@@ -12,12 +12,7 @@ from config.settings import LOG_DIR
 logger = logging.getLogger("IDS_ProcessControl")
 AUDIT_LOG = LOG_DIR / "audit.log"
 
-# Protected processes that must never be terminated or suspended
-PROTECTED_PROCESSES = {
-    "system", "smss.exe", "csrss.exe", "wininit.exe",
-    "winlogon.exe", "lsass.exe", "services.exe", "svchost.exe",
-    "dwm.exe", "registry", "memory compression"
-}
+from core.platform_adapter import is_process_protected, open_file_location as _platform_open_file
 
 
 def _audit(action: str, pid, process_name: str, result: str):
@@ -33,7 +28,7 @@ def _audit(action: str, pid, process_name: str, result: str):
 
 
 def _is_protected(process_name: str) -> bool:
-    return process_name.lower() in PROTECTED_PROCESSES
+    return is_process_protected(process_name)
 
 
 def kill_process(pid: int, process_name: str = "Unknown") -> tuple[bool, str]:
@@ -105,15 +100,5 @@ def resume_process(pid: int, process_name: str = "Unknown") -> tuple[bool, str]:
 
 
 def open_file_location(exe_path: str) -> tuple[bool, str]:
-    """Open Windows Explorer to the directory containing the executable."""
-    if not exe_path or exe_path == "N/A":
-        return False, "No file path available for this process."
-    try:
-        path = Path(exe_path)
-        if path.exists():
-            subprocess.Popen(["explorer", "/select,", str(path)])
-            return True, "Explorer opened."
-        else:
-            return False, f"Path does not exist: {exe_path}"
-    except Exception as e:
-        return False, str(e)
+    """Open the native file manager (Explorer / xdg-open) to the directory containing the executable."""
+    return _platform_open_file(exe_path)

@@ -15,7 +15,7 @@ FLOOD_THRESHOLD = 20
 FLOOD_WINDOW = 10  # seconds
 
 # Severity mappings based on Professional Incident Response standards
-HIGH_EVENTS = {4625, 4720, 4728, 7045, 1102}
+HIGH_EVENTS = {4625, 4720, 4728, 7045, 1102, 9999}
 MEDIUM_EVENTS = {7000, 7009, 17, 4688, 4672, 11707, 1033}
 LOW_EVENTS = {10016, 1014, 4104, 4798, 78}
 
@@ -24,8 +24,18 @@ def evaluate_event(event_data):
     Evaluates an event using professional rule-based heuristics.
     Returns categorized severity: "HIGH", "HIGH_FLOOD", "MEDIUM", "LOW", or "NORMAL"
     """
+    if event_data.get('source') == 'CanarySentry':
+        return "HIGH"
+
+    # LotL Process Lineage Check
+    if event_data.get('lotl_rule'):
+        logger.warning(f"Rule Engine: LotL Threat Flagged: {event_data['lotl_rule']}")
+        return event_data.get('lotl_severity', 'HIGH')
+
     event_id = event_data.get('event_id')
     message = event_data.get('message', '').lower()
+    cmdline = event_data.get('cmdline', '').lower()
+    combined_text = f"{message} {cmdline}".strip()
     user = event_data.get('user', 'Unknown')
     current_time = time.time()
     
@@ -39,18 +49,35 @@ def evaluate_event(event_data):
             logger.warning(f"Rule Engine: FLOOD DETECTED for Event {event_id}.")
             return "HIGH_FLOOD"
     
-    # 1. Pattern-based Rules (Suspicious Paths)
-    suspicious_paths = [r"\\appdata\\(?:local|roaming)", r"\\temp\\", r"\\windows\\temp\\"]
+    # 1. Pattern-based Rules (Suspicious Paths on Windows and Linux)
+    suspicious_paths = [
+        r"\\appdata\\(?:local|roaming)", r"\\temp\\", r"\\windows\\temp\\",
+        r"/tmp/", r"/dev/shm/", r"/var/tmp/"
+    ]
     for pattern in suspicious_paths:
-        if re.search(pattern, message):
+        if re.search(pattern, combined_text):
             logger.warning(f"Rule Engine: Suspicious path execution detected.")
             return "HIGH"
 
-    # 2. Offline / Raw Text Log Fallbacks
+    # 2. Offline / Raw Text / Linux Auth Log Fallbacks
     if event_id is None or event_id == 0:
-        if "failed login" in message or "unauthorized" in message:
+        is_auth_failure = (
+            "failed login" in message
+            or "unauthorized" in message
+            or "failed password" in message
+            or "authentication failure" in message
+            or "invalid user" in message
+            or "not in sudoers" in message
+        )
+        if is_auth_failure:
+            failed_logins[user] = [t for t in failed_logins[user] if current_time - t <= FAILED_LOGIN_WINDOW_SECONDS]
+            failed_logins[user].append(current_time)
+            if len(failed_logins[user]) >= FAILED_LOGIN_THRESHOLD:
+                logger.warning(f"Rule Engine: Brute force detected for user '{user}'.")
+                return "HIGH"
             return "MEDIUM"
-        if "error" in message or "exception" in message:
+
+        if "error" in message or "exception" in message or "denied" in message:
             return "LOW"
         return "NORMAL"
         

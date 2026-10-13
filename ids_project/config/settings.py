@@ -38,6 +38,11 @@ SERVICE_NAME = "Sentinel"
 SERVICE_DISPLAY_NAME = "Sentinel"
 SERVICE_DESCRIPTION = "Background service for monitoring system logs and detecting anomalies using AI."
 
+# Canary Deception Settings (Active Ransomware Defense)
+ENABLE_CANARY_SENTRY = True
+CANARY_AUTOSUSPEND_PROCESS = True  # Automatically pause offending PID upon canary modification
+
+
 # Logging configuration
 logging.basicConfig(
     filename=APP_LOG_FILE,
