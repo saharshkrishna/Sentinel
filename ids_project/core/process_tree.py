@@ -88,6 +88,39 @@ CERTUTIL_DOWNLOAD_PATTERNS = [
     re.compile(r"bitsadmin(?:\.exe)?\s+/transfer", re.I)
 ]
 
+# Windows: PowerShell from suspicious/uncommon parents (T1059.001)
+POWERSHELL_SUSPICIOUS_PARENTS = {
+    "wmiprvse.exe", "w3wp.exe", "sqlservr.exe", "mshta.exe",
+    "regsvr32.exe", "rundll32.exe", "cmstp.exe", "certutil.exe",
+    "dllhost.exe", "wscript.exe", "cscript.exe"
+}
+
+# Windows: Process hollowing — benign system names from non-standard parents (T1055.012)
+HOLLOWING_TARGETS = {
+    "svchost.exe", "dllhost.exe", "taskhost.exe", "lsass.exe",
+    "services.exe", "smss.exe", "conhost.exe", "RuntimeBroker.exe"
+}
+HOLLOWING_LEGIT_PARENTS = {
+    "services.exe", "wininit.exe", "smss.exe", "svchost.exe",
+    "lsass.exe", "winlogon.exe"
+}
+
+# Linux: Cron / at daemon parent set
+LINUX_CRON_PARENTS = {"cron", "crond", "atd", "anacron"}
+
+# Scripting engines that should rarely spawn network tools
+SCRIPT_ENGINES = {
+    "python", "python3", "perl", "ruby", "node", "php",
+    "wscript.exe", "cscript.exe", "java"
+}
+NETWORK_TOOLS = {
+    "curl", "wget", "nc", "ncat", "netcat", "ssh", "scp",
+    "ftp", "tftp", "socat"
+}
+
+# Database processes — shell spawning indicates SQL injection (T1190)
+DB_PROCESSES = {"mysqld", "postgres", "sqlservr.exe", "mongod", "oracle", "mariadbd"}
+
 
 class ProcessTree:
     """Thread-safe Process Lineage DAG and LotL behavioral evaluator."""
@@ -196,6 +229,26 @@ class ProcessTree:
         for pat in REVERSE_SHELL_PATTERNS:
             if pat.search(cmd_lower):
                 return True, "HIGH", f"Linux_Reverse_Shell_Pipeline ({node.cmdline[:60]})"
+
+        # 6. Windows: PowerShell spawned from suspicious parent (WMI, IIS, COM)
+        if name_lower in {"powershell.exe", "pwsh.exe"} and pname_lower in POWERSHELL_SUSPICIOUS_PARENTS:
+            return True, "HIGH", f"Windows_Suspicious_PowerShell_Parent ({parent.name} -> {node.name})"
+
+        # 7. Windows: Process Hollowing Indicator (system process from wrong parent)
+        if name_lower in HOLLOWING_TARGETS and pname_lower and pname_lower not in HOLLOWING_LEGIT_PARENTS:
+            return True, "MEDIUM", f"Windows_Process_Hollowing_Indicator ({parent.name} -> {node.name})"
+
+        # 8. Linux: Cron/at daemon spawning interactive shell or downloader
+        if pname_lower in LINUX_CRON_PARENTS and name_lower in LINUX_DANGEROUS_CHILDREN:
+            return True, "MEDIUM", f"Linux_Cron_Shell_Execution ({parent.name} -> {node.name})"
+
+        # 9. Scripting engine spawning network tool (data exfil / C2 callback)
+        if pname_lower in SCRIPT_ENGINES and name_lower in NETWORK_TOOLS:
+            return True, "MEDIUM", f"Script_Engine_Network_Access ({parent.name} -> {node.name})"
+
+        # 10. Database process spawning shell (SQL injection indicator)
+        if pname_lower in DB_PROCESSES and name_lower in (LINUX_DANGEROUS_CHILDREN | WIN_DANGEROUS_CHILDREN):
+            return True, "HIGH", f"Database_Shell_Injection ({parent.name} -> {node.name})"
 
         return False, "NORMAL", ""
 
