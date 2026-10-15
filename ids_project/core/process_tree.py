@@ -314,6 +314,25 @@ class ProcessTree:
                             is_suspicious, sev, rule = self.evaluate_node(node)
                             if is_suspicious:
                                 logger.warning(f"LotL Threat Detected by ProcessTree: {rule}")
+                                # Dispatch to decision engine so UI, tray, and alerts.json are updated
+                                from core.decision_engine import process_event
+                                lotl_event = {
+                                    "event_id": 0,
+                                    "source": node.name,
+                                    "event_type": "LotL",
+                                    "time_generated": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                    "message": f"Living-off-the-Land rule triggered: {rule}",
+                                    "user": node.user,
+                                    "pid": node.pid,
+                                    "ppid": node.ppid,
+                                    "process_name": node.name,
+                                    "exe_path": node.exe_path,
+                                    "cmdline": node.cmdline,
+                                    "lotl_rule": rule,
+                                    "lotl_severity": sev,
+                                    "lineage_str": self.format_lineage_str(node.pid),
+                                }
+                                process_event(lotl_event, silent=False)
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
                         continue
 

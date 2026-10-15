@@ -211,7 +211,18 @@ class LinuxLogReader:
         pid_raw = entry.get("_PID")
         pid = int(pid_raw) if pid_raw and str(pid_raw).isdigit() else None
         msg = str(entry.get("MESSAGE", "N/A"))
-        user = str(entry.get("_AUDIT_LOGINUID") or entry.get("_UID") or "Unknown")
+
+        # Resolve numeric UID to username (Linux journald stores raw UIDs)
+        uid_raw = entry.get("_AUDIT_LOGINUID") or entry.get("_UID")
+        user = "Unknown"
+        if uid_raw and str(uid_raw).isdigit():
+            try:
+                import pwd as _pwd
+                user = _pwd.getpwuid(int(uid_raw)).pw_name
+            except (KeyError, ImportError):
+                user = str(uid_raw)
+        elif uid_raw:
+            user = str(uid_raw)
 
         event_data = {
             "event_id": 0,

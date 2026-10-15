@@ -30,8 +30,8 @@ OLLAMA_MODEL = "deepseek-coder:6.7b"
 OLLAMA_TIMEOUT = 60 # Seconds to wait for a response
 
 # Detection Thresholds
-FAILED_LOGIN_THRESHOLD = 5 # Number of failed logins before triggering rule within a time window
-FAILED_LOGIN_WINDOW_SECONDS = 10
+FAILED_LOGIN_THRESHOLD = 3      # sudo allows max 3 retries per session; SSH brute-force hits quickly
+FAILED_LOGIN_WINDOW_SECONDS = 60  # 60s window catches multi-session brute-force attempts
 
 # Service Settings
 SERVICE_NAME = "Sentinel"
@@ -41,6 +41,14 @@ SERVICE_DESCRIPTION = "Background service for monitoring system logs and detecti
 # Canary Deception Settings (Active Ransomware Defense)
 ENABLE_CANARY_SENTRY = True
 CANARY_AUTOSUSPEND_PROCESS = True  # Automatically pause offending PID upon canary modification
+
+# Digital Forensics Vault Settings
+FORENSICS_DIR = LOG_DIR / "forensics"
+os.makedirs(FORENSICS_DIR, exist_ok=True)
+ENABLE_PRE_KILL_FORENSICS = True  # Capture volatile memory and binary hashes before process termination
+
+# Network Containment Settings
+ENABLE_NETWORK_GUARD = True
 
 
 # Logging configuration

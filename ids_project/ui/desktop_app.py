@@ -199,6 +199,13 @@ class DesktopIDSApp:
         )
         btn_limits.pack(side=tk.LEFT, padx=5)
 
+        self.btn_host_isolate = tk.Button(
+            action_bar, text="🛑 Isolate Host", command=self.action_toggle_host_isolation,
+            bg="#451a03", fg="#fde047", activebackground="#78350f", activeforeground="#fef08a",
+            relief="flat", font=(FONT_FAMILY, 9, "bold"), padx=10, pady=4, cursor="hand2"
+        )
+        self.btn_host_isolate.pack(side=tk.LEFT, padx=5)
+
         # Right-aligned Status & Exit
         right_frame = tk.Frame(navbar, bg=BG_CARD)
         right_frame.pack(side=tk.RIGHT)
@@ -297,6 +304,14 @@ class DesktopIDSApp:
                   bg="#78350f", fg="#fef08a", activebackground="#92400e", activeforeground="#fef08a",
                   relief="flat", font=(FONT_FAMILY, 9, "bold"), padx=10, pady=3, cursor="hand2").pack(side=tk.LEFT, padx=6)
 
+        tk.Button(action_bar, text="📸 Snapshot (Forensics)", command=self.action_snapshot,
+                  bg="#1e1b4b", fg="#c7d2fe", activebackground="#312e81", activeforeground="white",
+                  relief="flat", font=(FONT_FAMILY, 9), padx=8, pady=3, cursor="hand2").pack(side=tk.LEFT, padx=5)
+
+        tk.Button(action_bar, text="🌐 Cut Network", command=self.action_isolate_process,
+                  bg="#312e81", fg="#e0e7ff", activebackground="#3730a3", activeforeground="white",
+                  relief="flat", font=(FONT_FAMILY, 9), padx=8, pady=3, cursor="hand2").pack(side=tk.LEFT, padx=5)
+
         tk.Button(action_bar, text="❌ End Task (Kill)", command=self.action_end_task,
                   bg="#7f1d1d", fg="#fecaca", activebackground="#991b1b", activeforeground="#fecaca",
                   relief="flat", font=(FONT_FAMILY, 9, "bold"), padx=10, pady=3, cursor="hand2").pack(side=tk.LEFT, padx=6)
@@ -373,6 +388,76 @@ class DesktopIDSApp:
         ok, msg = process_control.suspend_process(int(pid), name)
         messagebox.showinfo("Suspend Result", msg)
 
+    def action_snapshot(self):
+        ev = self._selected_event()
+        if ev is None: return
+        pid = ev.get("pid")
+        name = ev.get("process_name", "Unknown")
+        if pid is None:
+            messagebox.showwarning("Snapshot", "No PID available for this event.")
+            return
+        ok, msg = process_control.capture_snapshot(int(pid), name)
+        if ok:
+            messagebox.showinfo("Forensics Snapshot Created",
+                                f"Digital evidence captured successfully for '{name}' (PID {pid}).\n\n{msg}")
+            self.lbl_footer_status.config(text=f"Forensic snapshot saved for PID {pid} ({name})")
+        else:
+            messagebox.showerror("Snapshot Failed", f"Could not capture forensics: {msg}")
+
+    def action_isolate_process(self):
+        ev = self._selected_event()
+        if ev is None: return
+        pid = ev.get("pid")
+        name = ev.get("process_name", "Unknown")
+        exe_path = ev.get("exe_path", "")
+        if pid is None:
+            messagebox.showwarning("Network Cut", "No PID available for this event.")
+            return
+        if not messagebox.askyesno("Confirm Process Network Isolation",
+                                    f"🌐 Sever all network connectivity for '{name}' (PID {pid})?\n\n"
+                                    "Active TCP/UDP sockets will be blocked via kernel firewall rules.\n"
+                                    "The process will remain running locally for analysis but cannot communicate over the network.",
+                                    icon="warning"):
+            return
+        ok, msg = process_control.isolate_process_network(int(pid), name, exe_path)
+        if ok:
+            messagebox.showinfo("Network Cut Applied", msg)
+            self.lbl_footer_status.config(text=f"Network blocked for PID {pid} ({name})")
+        else:
+            messagebox.showerror("Network Cut Failed", msg)
+
+    def action_toggle_host_isolation(self):
+        if not process_control.is_host_isolated():
+            if not messagebox.askyesno("🚨 EMERGENCY HOST NETWORK CONTAINMENT",
+                                        "Are you sure you want to isolate this entire machine from the network?\n\n"
+                                        "• All inbound and outbound traffic will be dropped immediately.\n"
+                                        "• Loopback / local inter-process communication remains functional.\n"
+                                        "• Lateral movement and ransomware C2 beacons will be instantly severed.\n\n"
+                                        "Proceed with Host Isolation?",
+                                        icon="warning"):
+                return
+            ok, msg = process_control.isolate_host()
+            if ok:
+                self.btn_host_isolate.config(text="🟢 Restore Network", bg="#14532d", fg="#86efac",
+                                             activebackground="#166534", activeforeground="white")
+                self.lbl_footer_status.config(text="🚨 HOST NETWORK ISOLATED — System in quarantine mode")
+                messagebox.showwarning("Host Isolated", "Host is now isolated from all external network traffic.")
+            else:
+                messagebox.showerror("Isolation Failed", f"Failed to isolate host: {msg}")
+        else:
+            if not messagebox.askyesno("Confirm Network Restore",
+                                        "Restore normal network connectivity to this host?\n\n"
+                                        "Firewall isolation rules will be flushed and normal traffic will resume."):
+                return
+            ok, msg = process_control.restore_host()
+            if ok:
+                self.btn_host_isolate.config(text="🛑 Isolate Host", bg="#451a03", fg="#fde047",
+                                             activebackground="#78350f", activeforeground="#fef08a")
+                self.lbl_footer_status.config(text="Host network restored to normal operations")
+                messagebox.showinfo("Network Restored", "Host network isolation rules successfully removed.")
+            else:
+                messagebox.showerror("Restore Failed", f"Failed to restore network: {msg}")
+
     def action_end_task(self):
         ev = self._selected_event()
         if ev is None: return
@@ -382,8 +467,10 @@ class DesktopIDSApp:
             messagebox.showwarning("End Task", "No PID available for this event.")
             return
         if not messagebox.askyesno("Confirm End Task",
-                                    f"⚠ This will TERMINATE '{name}' (PID {pid}).\n"
-                                    "Any unsaved memory in that process will be lost. Proceed?",
+                                    f"⚠ This will TERMINATE '{name}' (PID {pid}).\n\n"
+                                    "A pre-kill digital forensics snapshot (memory dump, binary hash, sockets) "
+                                    "will be automatically saved to logs/forensics/.\n\n"
+                                    "Proceed with termination?",
                                     icon="warning"):
             return
         ok, msg = process_control.kill_process(int(pid), name)

@@ -272,7 +272,7 @@ def evaluate_event(event_data):
     current_time = time.time()
     
     # 0. Global Sliding-Window Frequency Matching
-    if event_id:
+    if event_id is not None:  # explicit check — 0 is falsy but still a valid Linux event_id
         key = f"{event_id}_{user}"
         event_history[key] = [t for t in event_history[key] if current_time - t <= FLOOD_WINDOW]
         event_history[key].append(current_time)
@@ -321,6 +321,10 @@ def evaluate_event(event_data):
             or "authentication failure" in message
             or "invalid user" in message
             or "not in sudoers" in message
+            # PAM / auditd patterns (Linux journald)
+            or "password check failed" in message          # unix_chkpwd
+            or "incorrect password attempt" in message     # sudo summary line
+            or ("op=pam:authentication" in message and "res=failed" in message)  # AUDIT1100
         )
         if is_auth_failure:
             failed_logins[user] = [t for t in failed_logins[user] if current_time - t <= FAILED_LOGIN_WINDOW_SECONDS]
@@ -330,7 +334,13 @@ def evaluate_event(event_data):
                 return "HIGH"
             return "MEDIUM"
 
-        if "error" in message or "exception" in message or "denied" in message:
+        # Only flag "denied" when the source is security-sensitive to avoid
+        # SELinux/dbus/systemd audit noise generating false positive LOW alerts
+        _AUTH_SOURCES = {"sshd", "sudo", "su", "passwd", "login", "pam",
+                         "polkit", "unix_chkpwd", "gdm", "lightdm", "kdm"}
+        source_lc = event_data.get("source", "").lower()
+        is_auth_denied = "denied" in message and any(s in source_lc for s in _AUTH_SOURCES)
+        if "error" in message or "exception" in message or is_auth_denied:
             return "LOW"
         return "NORMAL"
         
